@@ -8,64 +8,58 @@ export class AdaptiveLearningEngine {
   constructor(userId: string) {
     this.concepts = adaptiveConcepts;
     this.path = {
-      currentConcept: 'c1', // Start mit erstem Konzept
+      currentConcept: 'c1',
       performanceHistory: [],
-      difficultyLevel: 5, // Start bei mittlerem Niveau (1-10)
-      learningStyle: undefined // Wird erkannt
+      answeredQuestions: [],
+      difficultyLevel: 5,
+      learningStyle: undefined
     };
     this.loadProgress(userId);
   }
 
-  // Lädt Fortschritt aus localStorage
   private loadProgress(userId: string) {
     const saved = localStorage.getItem(`adaptive_path_${userId}`);
     if (saved) {
-      this.path = JSON.parse(saved);
+      const loadedPath = JSON.parse(saved);
+      // Ensure answeredQuestions exists (for backward compatibility)
+      if (!loadedPath.answeredQuestions) {
+        loadedPath.answeredQuestions = [];
+      }
+      this.path = loadedPath;
     }
   }
 
-  // Speichert Fortschritt
   private saveProgress(userId: string) {
     localStorage.setItem(`adaptive_path_${userId}`, JSON.stringify(this.path));
   }
 
-  // Aktuelles Konzept holen
   getCurrentConcept(): LearningConcept | undefined {
     return this.concepts.find(c => c.id === this.path.currentConcept);
   }
 
-  // Bestimme welchen Content zu zeigen (basierend auf aktuellem Level)
   getContentForCurrentLevel(): string {
     const concept = this.getCurrentConcept();
     if (!concept) return '';
 
     const level = this.path.difficultyLevel;
 
-    // Level 1-3: Einfach
     if (level <= 3) {
       return concept.coreContent + '\n\n---\n\n' + concept.deepening.easy;
-    }
-    // Level 4-7: Mittel
-    else if (level <= 7) {
+    } else if (level <= 7) {
       return concept.coreContent + '\n\n---\n\n' + concept.deepening.medium;
-    }
-    // Level 8-10: Anspruchsvoll
-    else {
+    } else {
       return concept.coreContent + '\n\n---\n\n' + concept.deepening.advanced;
     }
   }
 
-  // Alternative Erklärung holen (wenn nicht verstanden)
   getAlternativeExplanation(): string {
     const concept = this.getCurrentConcept();
     if (!concept) return '';
 
-    // Wenn Lernstil schon erkannt: bevorzuge diesen
     if (this.path.learningStyle) {
       return concept.alternativeExplanations[this.path.learningStyle];
     }
 
-    // Sonst: gib alle Optionen
     return `
 ## Verschiedene Zugänge zu diesem Thema:
 
@@ -80,7 +74,6 @@ ${concept.alternativeExplanations.analytical}
     `;
   }
 
-  // Beispiele holen (basierend auf Level)
   getExamples(): string[] {
     const concept = this.getCurrentConcept();
     if (!concept) return [];
@@ -92,7 +85,6 @@ ${concept.alternativeExplanations.analytical}
     }
   }
 
-  // Verarbeite Antwort und passe System an
   processAnswer(questionId: string, answer: any, timeSpent: number, userId: string): {
     correct: boolean;
     explanation: string;
@@ -108,10 +100,23 @@ ${concept.alternativeExplanations.analytical}
     const correct = this.checkAnswer(question, answer);
     const score = correct ? 100 : 0;
 
+    // **NEU**: Tracke diese spezifische Frage
+    const alreadyAnswered = this.path.answeredQuestions.some(
+      q => q.conceptId === concept.id && q.questionId === questionId
+    );
+    
+    if (!alreadyAnswered) {
+      this.path.answeredQuestions.push({
+        conceptId: concept.id,
+        questionId: questionId,
+        correct
+      });
+    }
+
     // Update Performance History
     const existing = this.path.performanceHistory.find(p => p.conceptId === concept.id);
     if (existing) {
-      existing.score = (existing.score + score) / 2; // Durchschnitt
+      existing.score = (existing.score + score) / 2;
       existing.attempts++;
       existing.timeSpent += timeSpent;
       existing.needsReview = existing.score < 70;
@@ -127,38 +132,42 @@ ${concept.alternativeExplanations.analytical}
 
     // Adjust difficulty level
     if (correct) {
-      // Schnell + richtig = Level steigt stärker
-      if (timeSpent < 30000) { // < 30 Sekunden
+      if (timeSpent < 30000) {
         this.path.difficultyLevel = Math.min(10, this.path.difficultyLevel + 1);
       } else {
         this.path.difficultyLevel = Math.min(10, this.path.difficultyLevel + 0.5);
       }
     } else {
-      // Falsch = Level sinkt
       this.path.difficultyLevel = Math.max(1, this.path.difficultyLevel - 1);
     }
 
-    // Entscheide nächste Aktion
+    // **VERBESSERT**: Entscheide nächste Aktion basierend auf beantworteten Fragen
     let nextAction: 'continue' | 'deepen' | 'alternative' | 'next_concept';
 
-    if (correct) {
-      // Alle Fragen beantwortet?
-      const answeredAll = concept.checkQuestions.every(q => 
-        this.path.performanceHistory.some(p => p.conceptId === concept.id)
-      );
+    const answeredForThisConcept = this.path.answeredQuestions.filter(
+      q => q.conceptId === concept.id
+    );
+    const totalQuestions = concept.checkQuestions.length;
+    const allQuestionsAnswered = answeredForThisConcept.length >= totalQuestions;
 
-      if (answeredAll) {
+    console.log(`Concept ${concept.id}: ${answeredForThisConcept.length}/${totalQuestions} questions answered`);
+
+    if (correct) {
+      if (allQuestionsAnswered) {
         const avgScore = existing?.score || score;
+        console.log(`All questions answered! Avg score: ${avgScore}`);
+        
         if (avgScore >= 80) {
-          nextAction = 'next_concept'; // Weiter zum nächsten Konzept
+          nextAction = 'next_concept';
+        } else if (avgScore >= 50) {
+          nextAction = 'deepen';
         } else {
-          nextAction = 'deepen'; // Vertiefung nötig
+          nextAction = 'alternative';
         }
       } else {
-        nextAction = 'continue'; // Nächste Frage
+        nextAction = 'continue';
       }
     } else {
-      // Falsch → Alternative Erklärung
       nextAction = 'alternative';
     }
 
@@ -172,7 +181,6 @@ ${concept.alternativeExplanations.analytical}
     };
   }
 
-  // Hilfsfunktion: Antwort checken
   private checkAnswer(question: Question, answer: any): boolean {
     switch (question.type) {
       case 'multiple-choice':
@@ -185,24 +193,20 @@ ${concept.alternativeExplanations.analytical}
         );
       
       case 'slider':
-        // Slider: Akzeptiere Werte nahe dem Ziel (±2)
         const target = question.correctAnswer as number;
         return Math.abs(answer - target) <= 2;
       
       case 'card-sorting':
-        // Card Sorting: Prüfe ob Items in richtigen Kategorien sind
         if (!answer || typeof answer !== 'object') return false;
         
         const correctCategories = question.correctAnswer as {[key: string]: string[]};
         let correctPlacements = 0;
         let totalItems = 0;
         
-        // Zähle alle Items
         Object.keys(correctCategories).forEach(category => {
           totalItems += correctCategories[category].length;
         });
         
-        // Prüfe jede Kategorie
         Object.keys(correctCategories).forEach(category => {
           const correctItems = correctCategories[category];
           const userItems = answer[category] || [];
@@ -214,12 +218,10 @@ ${concept.alternativeExplanations.analytical}
           });
         });
         
-        // Mindestens 60% müssen richtig sein
         const score = totalItems > 0 ? (correctPlacements / totalItems) : 0;
         return score >= 0.6;
       
       case 'comparison':
-        // Comparison: Prüfe jede Einzelantwort
         const correctComparisons = question.correctAnswer as {[key: string]: string};
         let correctAnswers = 0;
         let totalQuestions = Object.keys(correctComparisons).length;
@@ -230,7 +232,7 @@ ${concept.alternativeExplanations.analytical}
           }
         });
         
-        return (correctAnswers / totalQuestions) >= 0.7; // 70% richtig
+        return (correctAnswers / totalQuestions) >= 0.7;
       
       case 'sorting':
       case 'matching':
@@ -241,31 +243,28 @@ ${concept.alternativeExplanations.analytical}
     }
   }
 
-  // Gehe zum nächsten Konzept
   moveToNextConcept(userId: string): boolean {
     const current = this.getCurrentConcept();
     if (!current || !current.followUp || current.followUp.length === 0) {
-      return false; // Kein nächstes Konzept
+      console.log('No more concepts!');
+      return false;
     }
 
-    // Nimm das erste Follow-up Konzept
     this.path.currentConcept = current.followUp[0];
+    console.log(`Moving to concept: ${this.path.currentConcept}`);
     this.saveProgress(userId);
     return true;
   }
 
-  // Erkenne Lernstil (basierend auf Performance bei verschiedenen Erklärungstypen)
   detectLearningStyle(preferredExplanation: 'narrative' | 'visual' | 'analytical') {
     this.path.learningStyle = preferredExplanation;
   }
 
-  // Prüfe ob alle Konzepte abgeschlossen
   isComplete(): boolean {
     return this.path.performanceHistory.length >= this.concepts.length &&
            this.path.performanceHistory.every(p => !p.needsReview);
   }
 
-  // Statistiken für Zertifikat
   getStatistics() {
     const totalScore = this.path.performanceHistory.reduce((sum, p) => sum + p.score, 0);
     const avgScore = totalScore / this.path.performanceHistory.length || 0;
@@ -281,7 +280,6 @@ ${concept.alternativeExplanations.analytical}
     };
   }
 
-  // Hole Konzepte, die Review brauchen
   getConceptsNeedingReview(): LearningConcept[] {
     const needReviewIds = this.path.performanceHistory
       .filter(p => p.needsReview)

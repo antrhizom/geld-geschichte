@@ -39,6 +39,11 @@ export interface AdaptivePath {
     timeSpent: number;
     needsReview: boolean;
   }[];
+  answeredQuestions: {
+    conceptId: string;
+    questionId: string;
+    correct: boolean;
+  }[];
   difficultyLevel: number; // 1-10, dynamisch angepasst
   learningStyle?: 'narrative' | 'visual' | 'analytical'; // Wird erkannt
 }
