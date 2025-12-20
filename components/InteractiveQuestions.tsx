@@ -133,16 +133,28 @@ export function CardSortingQuestion({ question, onAnswer, disabled, userAnswer, 
   const [unassigned, setUnassigned] = useState<string[]>(
     userAnswer ? [] : [...question.items]
   );
+  const [draggedItem, setDraggedItem] = useState<string | null>(null);
 
-  const handleDrop = (item: string, category: string) => {
-    if (disabled) return;
+  const handleDragStart = (e: React.DragEvent, item: string) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', item);
+    setDraggedItem(item);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent, category: string) => {
+    e.preventDefault();
+    const item = e.dataTransfer.getData('text/plain');
+    
+    if (!item || disabled) return;
 
     // Entferne aus alter Kategorie oder unassigned
     let newCategories = { ...categories };
-    let newUnassigned = [...unassigned];
-
-    // Entferne aus unassigned
-    newUnassigned = newUnassigned.filter(i => i !== item);
+    let newUnassigned = unassigned.filter(i => i !== item);
 
     // Entferne aus allen Kategorien
     Object.keys(newCategories).forEach(cat => {
@@ -154,6 +166,28 @@ export function CardSortingQuestion({ question, onAnswer, disabled, userAnswer, 
 
     setCategories(newCategories);
     setUnassigned(newUnassigned);
+    setDraggedItem(null);
+  };
+
+  const handleDropToUnassigned = (e: React.DragEvent) => {
+    e.preventDefault();
+    const item = e.dataTransfer.getData('text/plain');
+    
+    if (!item || disabled) return;
+
+    // Entferne aus allen Kategorien
+    let newCategories = { ...categories };
+    Object.keys(newCategories).forEach(cat => {
+      newCategories[cat] = newCategories[cat].filter(i => i !== item);
+    });
+
+    // Füge zu unassigned hinzu (falls noch nicht drin)
+    if (!unassigned.includes(item)) {
+      setUnassigned([...unassigned, item]);
+    }
+    
+    setCategories(newCategories);
+    setDraggedItem(null);
   };
 
   const handleSubmit = () => {
@@ -166,24 +200,30 @@ export function CardSortingQuestion({ question, onAnswer, disabled, userAnswer, 
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-blue-50 to-primary-50 p-4 rounded-lg border border-blue-200">
         <p className="text-sm text-gray-700">
-          🎯 <strong>Aufgabe:</strong> Ordne die Karten den richtigen Kategorien zu!
+          🎯 <strong>Aufgabe:</strong> Ziehe die Karten in die passenden Kategorien! (Drag & Drop)
         </p>
       </div>
 
       {/* Unassigned Items */}
       {unassigned.length > 0 && (
-        <div className="bg-white p-4 rounded-xl border-2 border-dashed border-gray-300">
-          <h4 className="font-semibold text-gray-700 mb-3">Zu sortieren:</h4>
+        <div 
+          className="bg-white p-4 rounded-xl border-2 border-dashed border-gray-300 min-h-[80px]"
+          onDragOver={handleDragOver}
+          onDrop={handleDropToUnassigned}
+        >
+          <h4 className="font-semibold text-gray-700 mb-3">📦 Zu sortieren:</h4>
           <div className="flex flex-wrap gap-2">
             {unassigned.map((item, idx) => (
               <div
                 key={idx}
-                className="bg-gradient-to-r from-primary-100 to-orange-100 px-4 py-2 rounded-lg cursor-move hover:shadow-lg transition-shadow border border-primary-200"
+                className="bg-gradient-to-r from-primary-100 to-orange-100 px-4 py-3 rounded-lg cursor-grab active:cursor-grabbing hover:shadow-lg transition-all border border-primary-200"
                 draggable={!disabled}
+                onDragStart={(e) => handleDragStart(e, item)}
+                style={{ opacity: draggedItem === item ? 0.5 : 1 }}
               >
                 <div className="flex items-center gap-2">
                   <GripVertical className="w-4 h-4 text-gray-400" />
-                  <span className="font-medium">{item}</span>
+                  <span className="font-medium text-sm">{item}</span>
                 </div>
               </div>
             ))}
@@ -196,26 +236,33 @@ export function CardSortingQuestion({ question, onAnswer, disabled, userAnswer, 
         {question.categories.map((category: string, idx: number) => (
           <div
             key={idx}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const item = e.dataTransfer.getData('text');
-              handleDrop(item, category);
-            }}
-            className={`bg-white p-5 rounded-xl border-2 min-h-[150px] ${
-              disabled ? 'border-gray-200' : 'border-primary-300 hover:border-primary-500'
+            onDragOver={handleDragOver}
+            onDrop={(e) => handleDrop(e, category)}
+            className={`bg-white p-5 rounded-xl border-2 min-h-[150px] transition-all ${
+              disabled 
+                ? 'border-gray-200' 
+                : 'border-primary-300 hover:border-primary-500 hover:shadow-md'
             }`}
           >
-            <h4 className="font-bold text-lg text-primary-700 mb-3">{category}</h4>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
+                {categories[category]?.length || 0}
+              </div>
+              <h4 className="font-bold text-lg text-primary-700">{category}</h4>
+            </div>
             <div className="space-y-2">
               {categories[category]?.map((item, itemIdx) => (
                 <div
                   key={itemIdx}
                   draggable={!disabled}
-                  onDragStart={(e) => e.dataTransfer.setData('text', item)}
-                  className="bg-gradient-to-r from-primary-50 to-orange-50 px-3 py-2 rounded-lg cursor-move hover:shadow-md transition-shadow"
+                  onDragStart={(e) => handleDragStart(e, item)}
+                  className="bg-gradient-to-r from-primary-50 to-orange-50 px-3 py-3 rounded-lg cursor-grab active:cursor-grabbing hover:shadow-md transition-all border border-primary-100"
+                  style={{ opacity: draggedItem === item ? 0.5 : 1 }}
                 >
-                  {item}
+                  <div className="flex items-center gap-2">
+                    <GripVertical className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm font-medium">{item}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -224,13 +271,21 @@ export function CardSortingQuestion({ question, onAnswer, disabled, userAnswer, 
       </div>
 
       {!disabled && (
-        <button
-          onClick={handleSubmit}
-          disabled={unassigned.length > 0}
-          className="w-full bg-primary-600 text-white py-3 px-6 rounded-xl hover:bg-primary-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed shadow-lg"
-        >
-          {unassigned.length > 0 ? `Noch ${unassigned.length} Karten zu sortieren` : 'Antwort einreichen'}
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={handleSubmit}
+            disabled={unassigned.length > 0}
+            className="w-full bg-primary-600 text-white py-3 px-6 rounded-xl hover:bg-primary-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed shadow-lg"
+          >
+            {unassigned.length > 0 ? `Noch ${unassigned.length} Karten zu sortieren` : 'Antwort einreichen'}
+          </button>
+          
+          {unassigned.length === 0 && (
+            <p className="text-center text-sm text-green-600 font-medium">
+              ✅ Alle Karten sortiert! Du kannst einreichen oder noch Änderungen vornehmen.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
