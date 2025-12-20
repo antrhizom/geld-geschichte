@@ -190,21 +190,33 @@ ${concept.alternativeExplanations.analytical}
         return Math.abs(answer - target) <= 2;
       
       case 'card-sorting':
-        // Card Sorting: Prüfe ob Kategorien korrekt
+        // Card Sorting: Prüfe ob Items in richtigen Kategorien sind
+        if (!answer || typeof answer !== 'object') return false;
+        
         const correctCategories = question.correctAnswer as {[key: string]: string[]};
-        let correctCount = 0;
+        let correctPlacements = 0;
         let totalItems = 0;
         
+        // Zähle alle Items
+        Object.keys(correctCategories).forEach(category => {
+          totalItems += correctCategories[category].length;
+        });
+        
+        // Prüfe jede Kategorie
         Object.keys(correctCategories).forEach(category => {
           const correctItems = correctCategories[category];
           const userItems = answer[category] || [];
-          totalItems += correctItems.length;
+          
           correctItems.forEach((item: string) => {
-            if (userItems.includes(item)) correctCount++;
+            if (userItems.includes(item)) {
+              correctPlacements++;
+            }
           });
         });
         
-        return (correctCount / totalItems) >= 0.7; // 70% richtig = akzeptiert
+        // Mindestens 60% müssen richtig sein
+        const score = totalItems > 0 ? (correctPlacements / totalItems) : 0;
+        return score >= 0.6;
       
       case 'comparison':
         // Comparison: Prüfe jede Einzelantwort
